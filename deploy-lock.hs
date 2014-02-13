@@ -46,10 +46,6 @@ data LockStatus
     | Available
     deriving (Eq, Ord, Show, Read)
 
-lockAvailable :: Lock -> Bool
-lockAvailable (Lock Available) = True
-lockAvailable _                = False
-
 ------------------------------------------------------------------------
 -- Utils
 ------------------------------------------------------------------------
