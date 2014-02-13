@@ -23,7 +23,6 @@ import           Snap.Core                             (Snap)
 import qualified Snap.Core                             as Snap
 import qualified Snap.Http.Server                      as Snap
 import qualified Snap.Blaze                            as Snap
-import           System.Environment                    (getArgs)
 import           System.FilePath                       ((</>))
 import           System.IO.Error                       (isDoesNotExistError)
 import           Text.Blaze.Html5                      ((!))
@@ -307,7 +306,8 @@ run dataDir locksMV =
 
 main :: IO ()
 main = do
-    [locksFile, dataDir] <- getArgs
+    let locksFile = "locks"
+    let dataDir   = "data"
     locksList <- read <$> readFile locksFile
     locks <- forM locksList $ \name -> do
       status <- readLockStatus dataDir name
