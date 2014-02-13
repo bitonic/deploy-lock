@@ -114,9 +114,13 @@ displayLockLink = displayLockLink' . reLockName
 
 lockLockForm :: RenderEnv -> H.Html
 lockLockForm env =
-    H.form ! A.action (fromString ("/lock/" ++ reLockName env)) ! A.method "GET" $ do
-      H.input ! A.type_ "text" ! A.name "user"
-      H.input ! A.type_ "submit" ! A.value "Lock"
+    case lockStatus (reLock env) of
+      Available ->
+        H.form ! A.action (fromString ("/lock/" ++ reLockName env)) $ do
+          H.input ! A.type_ "text" ! A.name "user"
+          H.input ! A.type_ "submit" ! A.value "Lock"
+      Locked _ _ ->
+        return ()
 
 releaseLockLink :: RenderEnv -> H.Html
 releaseLockLink env =
@@ -287,17 +291,21 @@ releaseLock dataDir locksMV name = do
 
 listLocks :: MVar Locks -> Snap ()
 listLocks locksMV = do
-    locks <- liftIO $ withMVar locksMV $ return . HMS.keys
-    Snap.blaze $ renderBody "Locks" $ H.ul $ forM_ locks $ \name -> H.li $ do
-      H.b (fromString name)
-      " " >> displayLockLink' name
+    locks <- liftIO $ withMVar locksMV $ return . HMS.toList
+    Snap.blaze $ renderBody "Locks" $ H.ul $ forM_ locks $ \(name, lock) ->
+      H.li $ do
+        H.b (fromString name)
+        " - " >> case lockStatus lock of
+           Available     -> "Available"
+           Locked _ user -> H.toHtml $ "Locked by " ++ user
+        " - " >> displayLockLink' name
 
 run :: Action (Snap ())
 run dataDir locksMV =
     Snap.route [ ("status/:lock",  runAction displayLock)
                , ("lock/:lock",    runAction lockLock   )
                , ("release/:lock", runAction releaseLock)
-               , ("/",             listLocks locksMV)
+               , ("/",             listLocks locksMV    )
                ]
   where
     runAction m = m dataDir locksMV . BC8.unpack =<< getParam "lock"
