@@ -224,7 +224,6 @@ type Action a = FilePath -> MVar Locks -> a
 runRender :: LockName -> Lock -> (RenderEnv -> H.Html) -> Snap ()
 runRender name lock r = do
     mbSecret <- readSecretCookie name
-    liftIO$ print mbSecret
     Snap.blaze $ r $ RenderEnv name lock mbSecret
 
 displayLock :: Action (LockName -> Snap ())
