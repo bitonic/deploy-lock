@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+import           Prelude                               hiding (catch)
+
 import           Control.Applicative                   ((<|>))
 import           Control.Concurrent.MVar               (MVar, newMVar, modifyMVar, withMVar, readMVar)
 import           Control.Exception                     (throwIO, catch)
