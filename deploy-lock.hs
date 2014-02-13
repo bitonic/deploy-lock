@@ -138,6 +138,8 @@ renderBody env title body = do
                Locked _ user -> H.toHtml $ "Locked by " ++ user
             releaseLockForm name lock mbSecret
             lockLockForm name lock
+      H.hr
+      H.a ! A.href "/" $ "Refresh"
 
 renderAlreadyLocked :: LockName -> String -> RenderEnv -> H.Html
 renderAlreadyLocked name user env =
