@@ -3,7 +3,7 @@
 import           Prelude                               hiding (catch)
 
 import           Control.Applicative                   ((<|>))
-import           Control.Concurrent.MVar               (MVar, newMVar, modifyMVar, withMVar, readMVar)
+import           Control.Concurrent.MVar               (MVar, newMVar, modifyMVar, readMVar)
 import           Control.Exception                     (throwIO, catch)
 import           Control.Monad                         (forM, mzero, when, forM_, join, void)
 import           Control.Monad.IO.Class                (liftIO)
@@ -99,41 +99,30 @@ writeLockStatus dataDir name status = do
 -- Html rendering
 ------------------------------------------------------------------------
 
-data RenderEnv = RenderEnv
-    { reLockName :: LockName
-    , reLock     :: Lock
-    , reSecret   :: Maybe B.ByteString
-    }
+type RenderEnv = [(LockName, Lock, Maybe B.ByteString)]
 
-displayLockLink' :: LockName -> H.Html
-displayLockLink' name =
-    H.a ! A.href (fromString ("/status/" ++ name)) $ "Status"
-
-displayLockLink :: RenderEnv -> H.Html
-displayLockLink = displayLockLink' . reLockName
-
-lockLockForm :: RenderEnv -> H.Html
-lockLockForm env =
-    case lockStatus (reLock env) of
+lockLockForm :: LockName -> Lock -> H.Html
+lockLockForm name lock =
+    case lockStatus lock of
       Available ->
-        H.form ! A.action (fromString ("/lock/" ++ reLockName env)) $ do
+        H.form ! A.action (fromString ("/lock/" ++ name)) $ do
           H.input ! A.type_ "text" ! A.name "user"
           H.input ! A.type_ "submit" ! A.value "Lock"
       Locked _ _ ->
         return ()
 
-releaseLockLink :: RenderEnv -> H.Html
-releaseLockLink env =
-    case lockStatus (reLock env) of
+releaseLockLink :: LockName -> Lock -> Maybe B.ByteString -> H.Html
+releaseLockLink name lock mbSecret =
+    case lockStatus lock of
       Available  -> return ()
       Locked _ _ ->
-        H.a ! A.href (fromString ("/release/" ++ reLockName env ++ query))
+        H.a ! A.href (fromString ("/release/" ++ name ++ query))
             $ H.toHtml text
   where
-    query = case reSecret env of
+    query = case mbSecret of
       Nothing      -> "?force=1"
       Just _secret -> ""
-    text :: String = case reSecret env of
+    text :: String = case mbSecret of
       Nothing      -> "Force release"
       Just _secret -> "Release"
 
@@ -146,45 +135,40 @@ renderBody title body = H.html $ do
 
 renderLockBody :: RenderEnv -> String -> H.Html -> H.Html
 renderLockBody env title body = renderBody title $ do
-    H.b $ H.toHtml $ reLockName env
-    void $ " - "
-    displayLockLink env
-    void $ if lockAvailable (reLock env) then "" else " - "
-    releaseLockLink env
-    lockLockForm env
+    H.ul $ do
+      forM_ env $ \(name, lock, mbSecret) ->
+        H.li $ do
+          H.b (fromString name)
+          " - " >> case lockStatus lock of
+             Available     -> "Available"
+             Locked _ user -> H.toHtml $ "Locked by " ++ user
+          void $ if lockAvailable lock then "" else " - "
+          releaseLockLink name lock mbSecret
+          lockLockForm name lock
     H.hr
     body
 
-renderDisplayLock :: RenderEnv -> H.Html
-renderDisplayLock env =
-    renderLockBody env ("Lock " ++ reLockName env) $ do
-      H.h1 $ H.toHtml $ reLockName env ++ " status"
-      H.h2 $ H.toHtml $ case lockStatus (reLock env) of
-        Available           -> "Available"
-        Locked _secret user -> "Taken by " ++ user
+renderAlreadyLocked :: LockName -> String -> RenderEnv -> H.Html
+renderAlreadyLocked name user env =
+    renderLockBody env (name ++ " is already locked!") $ do
+      H.toHtml $ name ++ " is already locked by " ++ user ++ "."
 
-renderAlreadyLocked :: String -> RenderEnv -> H.Html
-renderAlreadyLocked user env =
-    renderLockBody env (reLockName env ++ " is already locked!") $ do
-      H.toHtml $ reLockName env ++ " is already locked by " ++ user ++ "."
-
-renderLockedSuccesfully :: B.ByteString -> RenderEnv -> H.Html
-renderLockedSuccesfully secret env =
-    renderLockBody env (reLockName env ++ " was locked successfully!") $ do
-      H.toHtml $ reLockName env ++ " was locked successfully!"
+renderLockedSuccesfully :: LockName -> B.ByteString -> RenderEnv -> H.Html
+renderLockedSuccesfully name secret env =
+    renderLockBody env (name ++ " was locked successfully!") $ do
+      H.toHtml $ name ++ " was locked successfully!"
       H.br
       H.toHtml $ "Your secret is " ++ show secret
 
-renderAlreadyReleased :: RenderEnv -> H.Html
-renderAlreadyReleased env =
-    renderLockBody env (reLockName env <> " is available!") $ do
-      H.toHtml $ "I can't release " ++ reLockName env ++
-                 ", because it's already released."
+renderAlreadyReleased :: LockName -> RenderEnv -> H.Html
+renderAlreadyReleased name env =
+    renderLockBody env (name <> " is available!") $ do
+      H.toHtml $ "I can't release " ++ name ++ ", because it's already released."
 
-renderReleased :: RenderEnv -> H.Html
-renderReleased env =
-    renderLockBody env (reLockName env ++ " has been released.") $ do
-      H.toHtml $ reLockName env ++ " has now been released."
+renderReleased :: LockName -> RenderEnv -> H.Html
+renderReleased name env =
+    renderLockBody env (name ++ " has been released.") $ do
+      H.toHtml $ name ++ " has now been released."
 
 renderWrongCredentials :: RenderEnv -> H.Html
 renderWrongCredentials env =
@@ -225,17 +209,12 @@ deleteSecretCookie name = Snap.expireCookie (BC8.pack name) Nothing
 type Locks = HMS.HashMap LockName Lock
 type Action a = FilePath -> MVar Locks -> a
 
-runRender :: LockName -> Lock -> (RenderEnv -> H.Html) -> Snap ()
-runRender name lock r = do
-    mbSecret <- readSecretCookie name
-    Snap.blaze $ r $ RenderEnv name lock mbSecret
-
-displayLock :: Action (LockName -> Snap ())
-displayLock _dataDir locksMV name = do
-    locks <- liftIO $ readMVar locksMV
-    case HMS.lookup name locks of
-      Nothing   -> returnWith 404
-      Just lock -> runRender name lock renderDisplayLock
+runRender :: Locks -> (RenderEnv -> H.Html) -> Snap ()
+runRender locks r = do
+    env <- forM (HMS.toList locks) $ \(name, lock) -> do
+      mbSecret <- readSecretCookie name
+      return (name, lock, mbSecret)
+    Snap.blaze $ r env
 
 lockLock :: Action (LockName -> Snap ())
 lockLock dataDir locksMV name = do
@@ -247,17 +226,17 @@ lockLock dataDir locksMV name = do
           case lockStatus lock of
             Locked _secret user' ->
               return ( locks
-                     ,  do runRender name lock $ renderAlreadyLocked user'
+                     ,  do runRender locks $ renderAlreadyLocked name user'
                            returnWith 400
                      )
             Available -> do
               secret <- makeSecret
               let status = Locked secret user
-              let lock'  = lock{lockStatus = status}
+              let locks' = HMS.insert name lock{lockStatus = status} locks
               writeLockStatus dataDir name status
-              return ( HMS.insert name lock' locks
+              return ( locks'
                      , do writeSecretCookie name secret
-                          runRender name lock' $ renderLockedSuccesfully secret
+                          runRender locks' $ renderLockedSuccesfully name secret
                      )
 
 releaseLock :: Action (LockName -> Snap ())
@@ -272,38 +251,31 @@ releaseLock dataDir locksMV name = do
             Available ->
               return ( locks
                      , do deleteSecretCookie name
-                          runRender name lock renderAlreadyReleased
+                          runRender locks $ renderAlreadyReleased name
                           returnWith 400
                      )
             Locked secret _user | force || Just secret == mbSecret -> do
               writeLockStatus dataDir name Available
-              let lock' = lock{lockStatus = Available}
-              return ( HMS.insert name lock' locks
+              let locks' = HMS.insert name lock{lockStatus = Available} locks
+              return ( locks'
                      , do deleteSecretCookie name
-                          runRender name lock' renderReleased
+                          runRender locks' $ renderReleased name
                      )
             Locked _secret _user ->
               return ( locks
                      , do when (isJust mbSecret) $ deleteSecretCookie name
-                          runRender name lock renderWrongCredentials
+                          runRender locks renderWrongCredentials
                           returnWith 403
                      )
 
 listLocks :: MVar Locks -> Snap ()
 listLocks locksMV = do
-    locks <- liftIO $ withMVar locksMV $ return . HMS.toList
-    Snap.blaze $ renderBody "Locks" $ H.ul $ forM_ locks $ \(name, lock) ->
-      H.li $ do
-        H.b (fromString name)
-        " - " >> case lockStatus lock of
-           Available     -> "Available"
-           Locked _ user -> H.toHtml $ "Locked by " ++ user
-        " - " >> displayLockLink' name
+    locks <- liftIO $ readMVar locksMV
+    runRender locks $ \env -> renderLockBody env "Index" $ return ()
 
 run :: Action (Snap ())
 run dataDir locksMV =
-    Snap.route [ ("status/:lock",  runAction displayLock)
-               , ("lock/:lock",    runAction lockLock   )
+    Snap.route [ ("lock/:lock",    runAction lockLock   )
                , ("release/:lock", runAction releaseLock)
                , ("/",             listLocks locksMV    )
                ]
