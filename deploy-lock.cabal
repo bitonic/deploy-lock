@@ -15,8 +15,8 @@ executable deploy-lock
   build-depends:     base                 >= 4 && < 5
                    , bytestring           >= 0.10
                    , containers           >= 0.5
-                   , snap                 >= 0.13
                    , snap-core            >= 0.9
+                   , snap-server          >= 0.9
                    , unordered-containers >= 0.2
                    , safe                 >= 0.3
                    , filepath             >= 1.3

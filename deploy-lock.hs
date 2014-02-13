@@ -17,8 +17,9 @@ import           Data.Maybe                            (fromMaybe, isJust)
 import           Data.Monoid                           ((<>))
 import           Data.String                           (fromString)
 import           Safe                                  (readMay)
-import           Snap                                  (Snap)
-import qualified Snap                                  as Snap
+import           Snap.Core                             (Snap)
+import qualified Snap.Core                             as Snap
+import qualified Snap.Http.Server                      as Snap
 import qualified Snap.Blaze                            as Snap
 import           System.Environment                    (getArgs)
 import           System.FilePath                       ((</>))
@@ -286,7 +287,7 @@ releaseLock dataDir locksMV name = do
 
 listLocks :: MVar Locks -> Snap ()
 listLocks locksMV = do
-    locks <- Snap.liftIO $ withMVar locksMV $ return . HMS.keys
+    locks <- liftIO $ withMVar locksMV $ return . HMS.keys
     Snap.blaze $ renderBody "Locks" $ H.ul $ forM_ locks $ \name -> H.li $ do
       H.b (fromString name)
       " " >> displayLockLink' name
